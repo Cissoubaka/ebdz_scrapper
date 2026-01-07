@@ -1,10 +1,15 @@
-from flask import Flask, render_template_string, request, jsonify
+from flask import Flask, render_template_string, request, jsonify, send_from_directory
 import sqlite3
+import os
 
 app = Flask(__name__)
-DB_FILE = "edbz.db"
-CONFIG_FILE = "emule_config.json"
-KEY_FILE = ".emule_key"
+
+# Créer les répertoires nécessaires
+os.makedirs('./data/covers', exist_ok=True)
+
+DB_FILE = "./data/edbz.db"
+CONFIG_FILE = "./data/emule_config.json"
+KEY_FILE = "./data/.emule_key"
 
 # Configuration eMule/aMule - À PERSONNALISER
 EMULE_CONFIG = {
@@ -287,6 +292,35 @@ HTML_TEMPLATE = '''
             border-bottom: 1px solid #e0e0e0;
             padding: 20px;
             transition: background 0.2s;
+            display: flex;
+            gap: 20px;
+        }
+
+        .result-cover {
+            flex-shrink: 0;
+        }
+
+        .result-cover img {
+            width: 150px;
+            height: auto;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }
+
+        .result-content {
+            flex: 1;
+        }
+
+        .result-description {
+            background: #f8f9fa;
+            padding: 12px;
+            border-radius: 8px;
+            margin: 10px 0;
+            color: #555;
+            font-size: 0.95em;
+            line-height: 1.5;
+            max-height: 150px;
+            overflow-y: auto;
         }
 
         .result-item:last-child {
@@ -523,7 +557,7 @@ HTML_TEMPLATE = '''
     <div class="container">
         <div class="header">
             <span class="settings-icon" onclick="openSettings()">⚙️</span>
-            <h1>� Recherche de liens ed2k</h1>
+            <h1>🔍 Recherche de liens ed2k</h1>
             <p>Base de données EmuleBDZ</p>
         </div>
 
@@ -546,7 +580,7 @@ HTML_TEMPLATE = '''
         <div id="filterSection" style="display: none;">
             <div class="results" style="padding: 20px;">
                 <div class="filter-box">
-                    <label class="filter-label">� Filtrer les résultats affichés :</label>
+                    <label class="filter-label">🔍 Filtrer les résultats affichés :</label>
                     <input 
                         type="text" 
                         class="filter-input" 
@@ -556,10 +590,10 @@ HTML_TEMPLATE = '''
                 </div>
                 <div style="text-align: center;">
                     <button class="copy-all-button" onclick="copyAllLinks()">
-                        � Copier tous les liens affichés
+                        📋 Copier tous les liens affichés
                     </button>
                     <button class="copy-all-button" onclick="sendAllToEmule()" id="sendAllEmuleBtn" style="background: #007bff; display: none;">
-                        � Envoyer tous les liens à eMule
+                        🚀 Envoyer tous les liens à eMule
                     </button>
                     <div id="copyStatus" style="margin-top: 10px; color: #28a745; font-weight: bold;"></div>
                 </div>
@@ -607,10 +641,10 @@ HTML_TEMPLATE = '''
                 <input type="password" id="emulePassword" class="form-input" placeholder="Mot de passe EC">
             </div>
 
-            <button class="test-button" onclick="testConnection()">� Tester la connexion</button>
+            <button class="test-button" onclick="testConnection()">🔌 Tester la connexion</button>
             <div id="testResult" style="margin-top: 10px; text-align: center; font-weight: bold;"></div>
 
-            <button class="save-button" onclick="saveSettings()">� Enregistrer</button>
+            <button class="save-button" onclick="saveSettings()">💾 Enregistrer</button>
         </div>
     </div>
 
@@ -623,7 +657,7 @@ HTML_TEMPLATE = '''
             try {
                 const response = await fetch('/api/stats');
                 const data = await response.json();
-                document.getElementById('stats').innerHTML = `� ${data.total} liens ed2k dans la base`;
+                document.getElementById('stats').innerHTML = `📊 ${data.total} liens ed2k dans la base`;
                 
                 // Charge les paramètres aMule
                 emuleEnabled = data.emule_enabled || false;
@@ -730,7 +764,7 @@ HTML_TEMPLATE = '''
             const resultsDiv = document.getElementById('resultsContent');
 
             if (!keyword) {
-                resultsDiv.innerHTML = '<div class="no-results">� Entrez un mot-clé pour commencer la recherche</div>';
+                resultsDiv.innerHTML = '<div class="no-results">👆 Entrez un mot-clé pour commencer la recherche</div>';
                 document.getElementById('filterSection').style.display = 'none';
                 return;
             }
@@ -755,7 +789,7 @@ HTML_TEMPLATE = '''
                 if (!data.results || data.results.length === 0) {
                     resultsDiv.innerHTML = `
                         <div class="no-results">
-                            � Aucun résultat pour "${escapeHtml(keyword)}"${category ? ` dans "${category}"` : ''}<br>
+                            😕 Aucun résultat pour "${escapeHtml(keyword)}"${category ? ` dans "${category}"` : ''}<br>
                             <small>Essayez avec d'autres mots-clés</small>
                         </div>
                     `;
@@ -790,77 +824,84 @@ HTML_TEMPLATE = '''
         }
 
         function displayResults(results, keyword, category, filterText = '') {
-            const resultsDiv = document.getElementById('resultsContent');
-            
-            if (results.length === 0) {
-                resultsDiv.innerHTML = `
-                    <div class="no-results">
-                        � Aucun résultat après filtrage<br>
-                        <small>Essayez un autre filtre</small>
-                    </div>
-                `;
-                return;
-            }
+    const resultsDiv = document.getElementById('resultsContent');
+    
+    if (results.length === 0) {
+        resultsDiv.innerHTML = `<div class="no-results">😕 Aucun résultat après filtrage</div>`;
+        return;
+    }
 
-            const groupedByThread = {};
-            results.forEach(item => {
-                const threadKey = item.thread_id || item.thread_url;
-                if (!groupedByThread[threadKey]) {
-                    groupedByThread[threadKey] = {
-                        thread_title: item.thread_title,
-                        thread_url: item.thread_url,
-                        forum_category: item.forum_category,
-                        links: []
-                    };
-                }
-                groupedByThread[threadKey].links.push(item);
-            });
+    const groupedByThread = {};
+    results.forEach(item => {
+        const threadKey = item.thread_id || item.thread_url;
+        if (!groupedByThread[threadKey]) {
+            groupedByThread[threadKey] = {
+                thread_title: item.thread_title,
+                thread_url: item.thread_url,
+                forum_category: item.forum_category,
+                cover_image: item.cover_image,
+                description: item.description,
+                links: []
+            };
+        }
+        if (!groupedByThread[threadKey].cover_image && item.cover_image) {
+            groupedByThread[threadKey].cover_image = item.cover_image;
+        }
+        if (!groupedByThread[threadKey].description && item.description) {
+            groupedByThread[threadKey].description = item.description;
+        }
+        groupedByThread[threadKey].links.push(item);
+    });
 
-            let html = '';
-            Object.values(groupedByThread).forEach(thread => {
-                html += '<div class="result-item" data-thread>';
-                html += '<div class="result-title">' + escapeHtml(thread.thread_title || 'Sans titre') + '</div>';
-                html += '<div style="margin-bottom: 10px;">';
-                
-                if (thread.forum_category) {
-                    html += '<span class="category-badge">� ' + escapeHtml(thread.forum_category) + '</span> ';
-                }
-                html += '<span class="thread-badge">� ' + thread.links.length + ' lien(s)</span>';
-                html += '</div>';
-                
-                thread.links.forEach(item => {
-                    const sizeDisplay = item.filesize ? formatSize(item.filesize) : 'Taille inconnue';
-                    html += '<div style="margin: 15px 0; padding: 10px; background: #f8f9fa; border-radius: 8px;" data-link="' + escapeHtml(item.link) + '">';
-                    html += '<div class="result-filename">� ' + escapeHtml(item.filename || 'Nom inconnu') + '</div>';
-                    html += '<div class="result-meta"><span>� ' + sizeDisplay + '</span></div>';
-                    html += '<div class="result-link">' + escapeHtml(item.link) + '</div>';
-                    html += '<button class="copy-button" onclick="copyLinkButton(this)">� Copier le lien</button>';
-                    if (emuleEnabled) {
-                        html += '<button class="emule-button" onclick="sendToEmule(this)">� Envoyer à eMule</button>';
-                    }
-                    html += '</div>';
-                });
-                
-                html += '<div style="margin-top: 10px;">';
-                html += '<a href="' + escapeHtml(thread.thread_url) + '" target="_blank" style="color: #667eea; text-decoration: none;">� Voir le thread complet →</a>';
-                html += '</div>';
-                html += '</div>';
-            });
-
-            resultsDiv.innerHTML = html;
-            
-            const totalLinks = results.length;
-            const totalThreads = Object.keys(groupedByThread).length;
-            let statsText = '� ' + totalLinks + ' lien(s) trouvé(s) dans ' + totalThreads + ' thread(s) pour "' + escapeHtml(keyword) + '"';
-            if (category) {
-                statsText += ' dans "' + category + '"';
-            }
-            if (filterText) {
-                statsText += ' (filtrés par "' + escapeHtml(filterText) + '")';
-            }
-            document.getElementById('stats').innerHTML = statsText;
+    let html = '';
+    Object.values(groupedByThread).forEach(thread => {
+        html += '<div class="result-item">'; // Début de l'item
+        
+        // 1. Affichage de la couverture (si elle existe)
+        if (thread.cover_image) {
+            // Note: le scraper enregistre "covers/nom.jpg", la route Flask est "/data/covers/..."
+            // On ajuste donc le chemin ici
+            const imgPath = "/data/" + thread.cover_image;
+            html += `<div class="result-cover"><img src="${imgPath}" alt="Couverture"></div>`;
         }
 
+        html += '<div class="result-content">'; // Contenu à droite de l'image
+        html += '<div class="result-title">' + escapeHtml(thread.thread_title || 'Sans titre') + '</div>';
+        
+        html += '<div style="margin-bottom: 10px;">';
+        if (thread.forum_category) {
+            html += '<span class="category-badge">📂 ' + escapeHtml(thread.forum_category) + '</span> ';
+        }
+        html += '<span class="thread-badge">🔗 ' + thread.links.length + ' lien(s)</span>';
+        html += '</div>';
+
+        // 2. Affichage de la description (si elle existe)
+        if (thread.description) {
+            html += '<div class="result-description">' + escapeHtml(thread.description) + '</div>';
+        }
+        
+        // 3. Affichage des liens
+        thread.links.forEach(item => {
+            const sizeDisplay = item.filesize ? formatSize(item.filesize) : 'Taille inconnue';
+            html += '<div style="margin: 15px 0; padding: 10px; background: #f8f9fa; border-radius: 8px;" data-link="' + escapeHtml(item.link) + '">';
+            html += '<div class="result-filename">📄 ' + escapeHtml(item.filename || 'Nom inconnu') + '</div>';
+            html += '<div class="result-meta"><span>💾 ' + sizeDisplay + '</span></div>';
+            html += '<div class="result-link">' + escapeHtml(item.link) + '</div>';
+            html += '<button class="copy-button" onclick="copyLinkButton(this)">📋 Copier</button>';
+            if (emuleEnabled) {
+                html += '<button class="emule-button" onclick="sendToEmule(this)">🚀 eMule</button>';
+            }
+            html += '</div>';
+        });
+        
+        html += '<div style="margin-top: 10px;"><a href="' + escapeHtml(thread.thread_url) + '" target="_blank" style="color: #667eea; text-decoration: none;">🌐 Voir sur le forum →</a></div>';
+        html += '</div>'; // Fin de result-content
+        html += '</div>'; // Fin de result-item
+    });
+
+    resultsDiv.innerHTML = html;
+    // ... reste du code pour les stats ...
+}
         function copyAllLinks() {
             const linkElements = document.querySelectorAll('[data-link]');
             const links = Array.from(linkElements).map(el => el.getAttribute('data-link'));
@@ -939,7 +980,7 @@ HTML_TEMPLATE = '''
                     button.innerHTML = '✓ Envoyé !';
                     button.style.background = '#28a745';
                     setTimeout(() => {
-                        button.innerHTML = '� Envoyer à eMule';
+                        button.innerHTML = '🚀 Envoyer à eMule';
                         button.style.background = '#007bff';
                         button.disabled = false;
                     }, 2000);
@@ -948,7 +989,7 @@ HTML_TEMPLATE = '''
                     button.style.background = '#dc3545';
                     alert('Erreur: ' + (data.error || 'Impossible d envoyer a eMule'));
                     setTimeout(() => {
-                        button.innerHTML = '� Envoyer à eMule';
+                        button.innerHTML = '🚀 Envoyer à eMule';
                         button.style.background = '#007bff';
                         button.disabled = false;
                     }, 2000);
@@ -958,7 +999,7 @@ HTML_TEMPLATE = '''
                 button.style.background = '#dc3545';
                 alert('Erreur de connexion: ' + error.message);
                 setTimeout(() => {
-                    button.innerHTML = '� Envoyer à eMule';
+                    button.innerHTML = '🚀 Envoyer à eMule';
                     button.style.background = '#007bff';
                     button.disabled = false;
                 }, 2000);
@@ -1020,6 +1061,11 @@ HTML_TEMPLATE = '''
 def index():
     return render_template_string(HTML_TEMPLATE)
 
+@app.route('/data/covers/<path:filename>')
+def serve_cover(filename):
+    """Sert les images de couverture"""
+    return send_from_directory('./data/covers', filename)
+
 @app.route('/api/stats')
 def stats():
     try:
@@ -1057,7 +1103,7 @@ def search():
         
         if category:
             query = """
-                SELECT link, filename, filesize, thread_title, thread_url, thread_id, forum_category
+                SELECT link, filename, filesize, thread_title, thread_url, thread_id, forum_category, cover_image, description
                 FROM ed2k_links 
                 WHERE (filename LIKE ? OR thread_title LIKE ?) AND forum_category = ?
                 ORDER BY filename COLLATE NOCASE ASC
@@ -1067,7 +1113,7 @@ def search():
             cursor.execute(query, (search_term, search_term, category))
         else:
             query = """
-                SELECT link, filename, filesize, thread_title, thread_url, thread_id, forum_category
+                SELECT link, filename, filesize, thread_title, thread_url, thread_id, forum_category, cover_image, description
                 FROM ed2k_links 
                 WHERE filename LIKE ? OR thread_title LIKE ?
                 ORDER BY filename COLLATE NOCASE ASC
@@ -1085,7 +1131,9 @@ def search():
                 'thread_title': row[3],
                 'thread_url': row[4],
                 'thread_id': row[5],
-                'forum_category': row[6]
+                'forum_category': row[6],
+                'cover_image': row[7],
+                'description': row[8]
             })
         
         conn.close()
@@ -1358,9 +1406,9 @@ if __name__ == '__main__':
         exit(1)
     
     print("=" * 60)
-    print("� Serveur de recherche ed2k démarré !")
+    print("🚀 Serveur de recherche ed2k démarré !")
     print("=" * 60)
-    print("\n� Ouvre ton navigateur et va sur :")
+    print("\n📍 Ouvre ton navigateur et va sur :")
     print("   http://localhost:8080")
     print("   ou http://127.0.0.1:8080")
     print("\n⏹️  Pour arrêter le serveur : Ctrl+C")
