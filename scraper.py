@@ -80,8 +80,32 @@ class MyBBScraper:
             traceback.print_exc()
             return False
     
+    def extract_volume_number(self, filename):
+        """Extrait le numéro de volume depuis le nom de fichier"""
+        if not filename:
+            return None
+        
+        # Patterns pour détecter les numéros de volume
+        patterns = [
+            r'[Tt](\d{1,3})',           # T01, t12, T123
+            r'[Vv]ol\.?\s*(\d{1,3})',   # Vol.01, vol 12, Vol.123
+            r'[Vv](\d{1,3})',           # V01, v12
+            r'Volume\s*(\d{1,3})',      # Volume 01
+            r'Tome\s*(\d{1,3})',        # Tome 01
+            r'\s-\s(\d{1,3})\s',        # - 01 -
+            r'#(\d{1,3})',              # #01
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, filename, re.IGNORECASE)
+            if match:
+                volume = int(match.group(1))
+                return volume
+        
+        return None
+    
     def create_table(self):
-        """Crée la table pour stocker les liens ed2k"""
+        """Crée la table pour stocker les liens ed2k avec colonne volume"""
         connection = self.connect_db()
         if connection:
             cursor = connection.cursor()
@@ -91,6 +115,7 @@ class MyBBScraper:
                     link TEXT NOT NULL UNIQUE,
                     filename TEXT,
                     filesize TEXT,
+                    volume INTEGER,
                     thread_title TEXT,
                     thread_url TEXT,
                     thread_id TEXT,
@@ -103,7 +128,7 @@ class MyBBScraper:
             connection.commit()
             cursor.close()
             connection.close()
-            print("✓ Table créée/vérifiée dans edbz.db")
+            print("✓ Table créée/vérifiée dans edbz.db (avec colonne volume)")
     
     def extract_ed2k_links(self, html):
         """Extrait les liens ed2k du HTML"""
@@ -262,10 +287,15 @@ class MyBBScraper:
             links = self.extract_ed2k_links(html)
             for link in links:
                 filename, filesize = self.parse_ed2k_link(link)
+                
+                # Extrait le numéro de volume du nom de fichier
+                volume = self.extract_volume_number(filename)
+                
                 ed2k_data.append({
                     'link': link,
                     'filename': filename,
                     'filesize': filesize,
+                    'volume': volume,
                     'thread_title': thread_title,
                     'thread_url': thread_url,
                     'thread_id': thread_id,
@@ -275,7 +305,9 @@ class MyBBScraper:
                 })
             
             if links:
-                print(f"  → {len(links)} liens ed2k trouvés dans: {thread_title[:50]}")
+                volumes_found = [str(d['volume']) for d in ed2k_data if d['volume'] is not None]
+                volumes_info = f" (volumes: {', '.join(volumes_found)})" if volumes_found else ""
+                print(f"  → {len(links)} liens ed2k trouvés{volumes_info} dans: {thread_title[:50]}")
                 
         except Exception as e:
             print(f"Erreur lors du scraping du thread: {e}")
@@ -295,9 +327,9 @@ class MyBBScraper:
         for data in ed2k_data:
             try:
                 cursor.execute("""
-                    INSERT INTO ed2k_links (link, filename, filesize, thread_title, thread_url, thread_id, forum_category, cover_image, description)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (data['link'], data['filename'], data['filesize'], 
+                    INSERT INTO ed2k_links (link, filename, filesize, volume, thread_title, thread_url, thread_id, forum_category, cover_image, description)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (data['link'], data['filename'], data['filesize'], data['volume'],
                       data['thread_title'], data['thread_url'], data['thread_id'], 
                       data['forum_category'], data['cover_image'], data['description']))
                 saved += 1
@@ -370,7 +402,7 @@ if __name__ == "__main__":
         {
             'url': 'https://ebdz.net/forum/forumdisplay.php?fid=29',
             'category': 'Mangas',  # Nom pour identifier cette catégorie
-            'max_pages': 70  # Limite de pages (None pour tout scraper)
+            'max_pages': 71  # Limite de pages (None pour tout scraper)
         },
         # Ajoute d'autres forums ici :
         # {
